@@ -4,11 +4,23 @@ from environs import Env
 from random import randint
 
 API_VERSION_VK = 5.131
+VK_URL_API = "https://api.vk.com/method/"
+
+class VkError(Exception):
+
+    def __init__(self, error_code, error_message):
+        self.error_code = error_code
+        self.error_message = error_message
+        super().__init__(f'VK API error: {self.error_code}: {self.error_message}')
 
 
-def get_upload_url(url, group_id, token, version):
+def check_vk_errors(response):
+    if 'error' in response:
+        raise VkError(response['error']['error_code'], response['error']['error_msg'])
+
+
+def get_upload_url(group_id, token, version):
     """ Возвращает адрес сервера для загрузки фотографии на стену пользователя или сообщества.
-        :param url: url vk
         :param group_id: id группы
         :param token: ваш токен
         :param version: версия api vk
@@ -20,11 +32,13 @@ def get_upload_url(url, group_id, token, version):
         'group_id': group_id,
     }
     server_response = requests.get(
-        f'{url}photos.getWallUploadServer',
+        f'{VK_URL_API}photos.getWallUploadServer',
         params=server_params,
     )
     server_response.raise_for_status()
-    return server_response.json()['response']['upload_url']
+    upload_settings = server_response.json()
+    check_vk_errors(upload_settings)
+    return upload_settings['response']['upload_url']
 
 
 def upload_image(url, image):
@@ -33,17 +47,20 @@ def upload_image(url, image):
         :param image: картинка формата: JPG, PNG, GIF.
         :return: параметры server, photo, vk_hash,
     """
-    payload = {
-        'photo': image,
-    }
+    with open(image, 'rb') as comics_img:
+        payload = {
+            'photo': comics_img,
+        }
     upload_response = requests.post(url, files=payload)
     upload_response.raise_for_status()
-    return upload_response.json()['server'], upload_response.json()['photo'], upload_response.json()['hash']
+    upload_server = upload_response.json()['server']
+    upload_photo = upload_response.json()['photo']
+    upload_hash = upload_response.json()['hash']
+    return upload_server, upload_photo, upload_hash
 
 
-def save_on_server(url, group_id, token, version, server, photo, vk_hash):
+def save_on_server(group_id, token, version, server, photo, vk_hash):
     """ Сохраняет фотографии после успешной загрузки на URI, полученный методом photos.getWallUploadServer.
-        :param url: url vk
         :param group_id: id группы
         :param token: токен
         :param version: версия api вк
@@ -60,15 +77,16 @@ def save_on_server(url, group_id, token, version, server, photo, vk_hash):
         'hash': vk_hash,
         'group_id': group_id,
     }
-    response = requests.get(f"{url}photos.saveWallPhoto", params=params)
+    response = requests.get(f"{VK_URL_API}photos.saveWallPhoto", params=params)
     response.raise_for_status()
+    upload_settings = response.json()
+    check_vk_errors(upload_settings)
     response = response.json()['response'][0]
     return response['owner_id'], response['id']
 
 
-def post_on_the_wall(url, group_id, token, version, owner_id, photo_id, message, copyright):
+def post_on_the_wall(group_id, token, version, owner_id, photo_id, message, copyright):
     """ Позволяет создать запись на стене, опубликовать существующую запись.
-        :param url: vk url
         :param group_id: id группы вк
         :param token: токен
         :param version: версия api вк
@@ -81,38 +99,31 @@ def post_on_the_wall(url, group_id, token, version, owner_id, photo_id, message,
     params = {
         'access_token': token,
         'v': version,
-        'owner_id': 0-int(group_id),
+        'owner_id': -int(group_id),
         'from_group': 1,
         'attachments': photo,
         'message': message,
         'close_comments': 0,
         'copyright': copyright,
     }
-    response = requests.get(f"{url}wall.post", params=params)
+    response = requests.get(f"{VK_URL_API}wall.post", params=params)
     response.raise_for_status()
-    return response.json()
+    upload_settings = response.json()
+    check_vk_errors(upload_settings)
+    return upload_settings
 
 
-def save_photo(url_image, name_image, path_image):
+def download_photo(url_image, name_image):
     """
         :param url_image: url картинки
         :param name_image: имя для картинки
-        :param path_image: путь сохранения
     """
-    os.makedirs(path_image, exist_ok=True)
     response = requests.get(url_image)
     response.raise_for_status()
-    with open(f"{path_image}{os.sep}{name_image}", 'wb') as file:
+    with open(f"{name_image}", 'wb') as file:
         file.write(response.content)
 
-
-if __name__ == '__main__':
-    env = Env()
-    env.read_env()
-    vk_client_id = env.str("VK_CLIENT_ID")
-    vk_token = env.str("ACCESS_TOKEN")
-    vk_group_id = env.str("GROUP_ID")
-    vk_url_api = "https://api.vk.com/method/"
+def download_random_comic():
     url = f"https://xkcd.com/info.0.json"
     response = requests.get(url)
     response.raise_for_status()
@@ -122,27 +133,34 @@ if __name__ == '__main__':
     response.raise_for_status()
     message = response.json()['alt']
     picture_file_name = f"{picture_number}.png"
-    save_photo(url_image=response.json()['img'], name_image=picture_file_name, path_image=os.getcwd())
-    upload_url = get_upload_url(vk_url_api, vk_group_id, vk_token, API_VERSION_VK)
-    with open(picture_file_name, 'rb') as comics_img:
-        server, photo, vk_hash = upload_image(upload_url, comics_img)
+    url_image = response.json()['img']
+    return message, picture_file_name, url_image
+
+if __name__ == '__main__':
+    env = Env()
+    env.read_env()
+    vk_token = env.str("VK_ACCESS_TOKEN")
+    vk_group_id = env.str("VK_GROUP_ID")
+    message, picture_file_name, url_image = download_random_comic()
+    download_photo(url_image, picture_file_name)
+    try:
+        upload_url = get_upload_url(vk_group_id, vk_token, API_VERSION_VK)
+        server, photo, vk_hash = upload_image(upload_url, picture_file_name)
         owner_id, photo_id = save_on_server(
-            url=vk_url_api,
-            group_id=vk_group_id,
-            token=vk_token,
-            version=API_VERSION_VK,
-            server=server,
-            photo=photo,
-            vk_hash=vk_hash
+            vk_group_id,
+            vk_token,
+            API_VERSION_VK,
+            server,
+            photo,
+            vk_hash
         )
         post_on_the_wall(
-            url=vk_url_api,
-            group_id=vk_group_id,
-            token=vk_token,
-            version=API_VERSION_VK,
-            owner_id=owner_id,
-            photo_id=photo_id,
-            message=message,
-            copyright=url
+            vk_group_id,
+            vk_token,
+            API_VERSION_VK,
+            owner_id,
+            photo_id,
+            message,
         )
-    os.remove(comics_img.name)
+    finally:
+        os.remove(picture_file_name)
