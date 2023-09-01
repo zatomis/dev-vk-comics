@@ -6,6 +6,7 @@ from random import randint
 API_VERSION_VK = 5.131
 VK_URL_API = "https://api.vk.com/method/"
 
+
 class VkError(Exception):
 
     def __init__(self, error_code, error_message):
@@ -51,12 +52,10 @@ def upload_image(url, image):
         payload = {
             'photo': comics_img,
         }
-    upload_response = requests.post(url, files=payload)
-    upload_response.raise_for_status()
-    upload_server = upload_response.json()['server']
-    upload_photo = upload_response.json()['photo']
-    upload_hash = upload_response.json()['hash']
-    return upload_server, upload_photo, upload_hash
+        upload_response = requests.post(url, files=payload)
+        upload_response.raise_for_status()
+        upload = upload_response.json()
+    return upload['server'], upload['photo'], upload['hash']
 
 
 def save_on_server(group_id, token, version, server, photo, vk_hash):
@@ -81,11 +80,11 @@ def save_on_server(group_id, token, version, server, photo, vk_hash):
     response.raise_for_status()
     upload_settings = response.json()
     check_vk_errors(upload_settings)
-    response = response.json()['response'][0]
+    response = upload_settings['response'][0]
     return response['owner_id'], response['id']
 
 
-def post_on_the_wall(group_id, token, version, owner_id, photo_id, message, copyright):
+def post_on_the_wall(group_id, token, version, owner_id, photo_id, message):
     """ Позволяет создать запись на стене, опубликовать существующую запись.
         :param group_id: id группы вк
         :param token: токен
@@ -93,7 +92,6 @@ def post_on_the_wall(group_id, token, version, owner_id, photo_id, message, copy
         :param owner_id: id владельца фото
         :param photo_id: id фото
         :param message: сообщения на стене
-        :param copyright: сообщение для copyright
     """
     photo = f"photo{owner_id}_{photo_id}"
     params = {
@@ -104,7 +102,6 @@ def post_on_the_wall(group_id, token, version, owner_id, photo_id, message, copy
         'attachments': photo,
         'message': message,
         'close_comments': 0,
-        'copyright': copyright,
     }
     response = requests.get(f"{VK_URL_API}wall.post", params=params)
     response.raise_for_status()
@@ -123,6 +120,7 @@ def download_photo(url_image, name_image):
     with open(f"{name_image}", 'wb') as file:
         file.write(response.content)
 
+
 def download_random_comic():
     url = f"https://xkcd.com/info.0.json"
     response = requests.get(url)
@@ -131,10 +129,12 @@ def download_random_comic():
     url = f"https://xkcd.com/{picture_number}/info.0.json"
     response = requests.get(url)
     response.raise_for_status()
-    message = response.json()['alt']
+    rnd_comic = response.json()
+    message = rnd_comic['alt']
     picture_file_name = f"{picture_number}.png"
-    url_image = response.json()['img']
+    url_image = rnd_comic['img']
     return message, picture_file_name, url_image
+
 
 if __name__ == '__main__':
     env = Env()
