@@ -52,10 +52,10 @@ def upload_image(url, image):
         payload = {
             'photo': comics_img,
         }
-        upload_response = requests.post(url, files=payload)
-        upload_response.raise_for_status()
-        upload = upload_response.json()
-    return upload['server'], upload['photo'], upload['hash']
+        response = requests.post(url, files=payload)
+    response.raise_for_status()
+    upload_response = response.json()
+    return upload_response['server'], upload_response['photo'], upload_response['hash']
 
 
 def save_on_server(group_id, token, version, server, photo, vk_hash):
